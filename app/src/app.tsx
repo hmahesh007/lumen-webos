@@ -39,6 +39,10 @@ import {openChannel, runningApps, uninstallApp} from './lib/root';
 import {bootMark, navMark} from './lib/log';
 import {LANGS, setClockMode, setLang} from './lib/i18n';
 
+/** how long a return from an app is left to draw the screen again before Lumen reads the inputs and the open apps (webOS 5: the GPU redraws
+ *  the whole page, and a re-render on top of that stalls it) */
+const RETURN_SETTLE_MS = 1500;
+
 type Screen = 'home' | 'settings' | 'ambient' | 'guide';
 
 const ROW = {apps: 'apps', sources: 'sources', misc: 'misc', dock: 'dock', live: 'livetv', channels: 'channels'} as const;
@@ -188,9 +192,11 @@ export function App () {
 			}).catch(() => showToast('Could not read the inputs', 'error'));
 		};
 		const cancel = isWebOS() ? afterFirstFrame(refresh) : (refresh(), () => undefined);
-		const onVisibility = () => { if (!document.hidden) refresh(); };
+		// on a return, after the screen has been drawn again (RETURN_SETTLE_MS): a re-render in the first second stalls the redraw
+		let later = 0;
+		const onVisibility = () => { window.clearTimeout(later); if (!document.hidden) later = window.setTimeout(refresh, RETURN_SETTLE_MS); };
 		document.addEventListener('visibilitychange', onVisibility);
-		return () => { cancel(); document.removeEventListener('visibilitychange', onVisibility); };
+		return () => { cancel(); window.clearTimeout(later); document.removeEventListener('visibilitychange', onVisibility); };
 	}, [showToast]);
 
 	// the apps still open in the background (docs/keep-alive.md), read again 5 s after Lumen comes to the front: the TV may close some just then
@@ -199,15 +205,16 @@ export function App () {
 		if (!isWebOS()) { setRunning(['youtube.leanback.v4', 'com.beb.plxnative']); return undefined; }
 		let again = 0;
 		const read = () => runningApps().then((ids) => ids.sort()).then((ids) => setRunning((now) => (now.join() === ids.join() ? now : ids))).catch(() => undefined);
+		let first = 0;
 		const onVisibility = () => {
-			window.clearTimeout(again);
+			window.clearTimeout(again); window.clearTimeout(first);
 			if (document.hidden) return;
-			read();
+			first = window.setTimeout(read, RETURN_SETTLE_MS);
 			again = window.setTimeout(read, 5000);
 		};
-		const cancel = afterFirstFrame(onVisibility);
+		const cancel = afterFirstFrame(() => { read(); again = window.setTimeout(read, 5000); });
 		document.addEventListener('visibilitychange', onVisibility);
-		return () => { cancel(); window.clearTimeout(again); document.removeEventListener('visibilitychange', onVisibility); };
+		return () => { cancel(); window.clearTimeout(again); window.clearTimeout(first); document.removeEventListener('visibilitychange', onVisibility); };
 	}, []);
 
 	useEffect(() => { setPicks(config.wallpaperPicks, config.wpNewOnLaunch); setWallpaper(config.wallpaper); }, [config.wallpaper]);

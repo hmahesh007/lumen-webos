@@ -84,6 +84,10 @@ html.wp-video .lowerveil { background-color: transparent; background-image: var(
 .screen--dockhidden .lowerveil { display: none; }
 /* the picture is drawn in a canvas (components/LowerVeil.tsx): the veil itself draws nothing, so it is one layer with no tiles */
 .lowerveil--canvas { background: none !important; }
+/* no backdrop-filter (webOS 5's Chrome 68): a flat dark tint, which the GPU draws as one colour with no texture. The blurred copy's fade made it
+   allocate and clear a full-screen texture at the start of every Down and Up, a 150-270ms freeze before the slide */
+html.noblur .lowerveil { background: rgba(8, 10, 18, 0.58) !important; }
+html.noblur.wp-video .lowerveil { background: rgba(8, 10, 18, 0.42) !important; }
 .lowerveil > canvas, .backdrop > canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 /* Settings' and the Guide's picture, drawn in a canvas behind their content (ScreenBackdrop, lib/blurCanvas.ts) */
 .backdrop { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }

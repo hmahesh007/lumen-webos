@@ -97,7 +97,8 @@ while true; do
     # before the foreground query: right after a wake each query can take seconds
     [ ! -f "$NOWAKE_FLAG" ] && [ "$pwstate" = Active ] && wake_open ""
   fi
-  out=$(luna-send -n 1 luna://com.webos.applicationManager/getForegroundAppInfo '{}' </dev/null 2>/dev/null)
+  # extraInfo: on webOS 5 LG Home is a bar over the app in front, listed only here (as a second, _WEBOS_WINDOW_TYPE_HOME window)
+  out=$(luna-send -n 1 luna://com.webos.applicationManager/getForegroundAppInfo '{"extraInfo":true}' </dev/null 2>/dev/null)
   front=$(me_in_front "$out") && lastme=$front
   app=$(printf '%s' "$out" | sed -n 's/.*"appId":"\([^"]*\)".*/\1/p')
   if [ -n "$app" ] && [ "$app" != "$prevapp" ]; then prevapp=$app; note_recent "$app"; fi

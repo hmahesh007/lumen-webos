@@ -41,7 +41,9 @@ export function Row ({label, items, focused, selected, emptyText, titled, classN
 	const offset = slot !== undefined ? Math.max(0, Math.min(selected, items.length - 2) - slot) * STEP
 		: fits ? 0 : clamp(selected * STEP + size / 2 - VIEWPORT_WIDTH / 2, 0, total - VIEWPORT_WIDTH);
 	// the selected tile's centre from the row's centre, for the glass bar's sliding highlight (home.css)
-	const selX = selected * STEP + size / 2 - offset - (fits ? total : VIEWPORT_WIDTH) / 2;
+	// held clear of the bar's rounded ends here, not with CSS clamp(), which Chrome 68 (webOS 5) does not have
+	const selEdge = Math.max(0, (fits ? total : VIEWPORT_WIDTH) / 2 - LAYOUT.tileRadius - 130);
+	const selX = clamp(selected * STEP + size / 2 - offset - (fits ? total : VIEWPORT_WIDTH) / 2, -selEdge, selEdge);
 
 	return (
 		<section class={`row${focused || rest ? ' row--focused' : ''}${titled ? ' row--titled' : ''}${hidden ? ' row--hidden' : ''}${className ? ' ' + className : ''}`} style={`--row-w:${total}px`} onMouseLeave={onLeave}>

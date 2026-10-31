@@ -71,22 +71,42 @@
 	box-shadow: inset 0 2px 1px -1px rgba(255, 255, 255, 0.55), inset 2px 0 1px -1px rgba(255, 255, 255, 0.28), inset 0 -2px 1px -1px rgba(0, 0, 0, 0.18);
 }
 /* the bar's and the first grid row's tiles keep a layer each, so a Down or Up does not re-raster the rows they sit in (docs/frame-rate.md) */
-.rows > .row:nth-child(-n+2) .tile__box { will-change: transform; }
+/* every home tile keeps one: added on focus only, each Left/Right made a layer and dropped one, repainting the row it sits in */
+.rows .tile__box { will-change: transform; }
+/* and so do the tile itself and its name: without them, the name's fade made and dropped a layer each move, and Chromium re-sorted the
+   dock's layers and repainted every tile (LayerTree.layerPainted: 23 MP over 8 moves, 2.5 MP with these) */
+.rows .tile { will-change: transform; }
+.rows .tile__label { will-change: opacity; }
 
 /* focus-lift on home: a grid tile grows by --lift, a bar tile by --lift-bar so it stays inside the glass; --rx and --ry tilt it under the pointer (Tile.tsx) */
+/* focus is compositor-only on home: the tile's own picture never changes, so a move rasters nothing. The lift shadow (the tile's ::before, the
+   box's size and lifted with it) and the sheen (the box's ::after) are always there on layers of their own and only fade; drawn into the
+   tile on focus, they re-rastered both tiles on every move, and after a pause the GPU had to allocate and clear new textures for them, a
+   60-130ms stall on the first move (webOS 5, Chrome 68) */
 .rows .row .tile--focused .tile__box {
 	transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--lift)) translateY(-7.5px);
-	box-shadow: var(--lift-shadow);
+	background: rgba(255, 255, 255, 0.10); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.26), 0 2px 4px rgba(0, 0, 0, 0.16);
 }
 .rows > .row:first-child .tile--focused .tile__box {
 	transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--lift-bar)) translateY(-7.5px);
-	box-shadow: 0 12px 22px rgba(0, 0, 0, 0.32), 0 3px 6px rgba(0, 0, 0, 0.18);
 }
-.rows .row .tile--focused .tile__box::after {
+.rows .row .tile { position: relative; }
+.rows .row .tile::before {
+	content: ''; position: absolute; left: 0; top: 0; width: var(--layout-tile-size); height: var(--layout-tile-height);
+	border-radius: var(--layout-tile-radius); pointer-events: none;
+	box-shadow: 0 0 0 6px #fff, var(--lift-shadow); opacity: 0; will-change: opacity, transform;
+	transition: transform var(--dur-focus) ease-out, opacity 110ms ease-out;
+}
+/* the white ring round the focused tile is in the same layer as its lift shadow (as in the Live Sports app): it lifts with the tile and only fades */
+.rows > .row:first-child .tile::before { box-shadow: 0 0 0 6px #fff, 0 12px 22px rgba(0, 0, 0, 0.32), 0 3px 6px rgba(0, 0, 0, 0.18); }
+.rows .row .tile--focused::before { opacity: 1; transform: scale(var(--lift)) translateY(-7.5px); }
+.rows > .row:first-child .tile--focused::before { transform: scale(var(--lift-bar)) translateY(-7.5px); }
+.rows .row .tile__box::after {
 	content: ''; position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 2; border-radius: inherit; pointer-events: none;
 	background: linear-gradient(115deg, rgba(255, 255, 255, 0.36) 0%, rgba(255, 255, 255, 0.10) 28%, rgba(255, 255, 255, 0) 46%);
-	opacity: var(--lift-sheen);
+	opacity: 0; will-change: opacity;
 }
+.rows .row .tile--focused .tile__box::after { opacity: var(--lift-sheen); }
 
 /* the bar's name is taken out of the flow so it cannot move the icons; the tile keeps its full height so the grid stays put */
 .rows > .row:first-child .tile { position: relative; min-height: calc(var(--layout-tile-height) + 68px); }

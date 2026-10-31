@@ -17,6 +17,8 @@ import './theme/themes.css';
 
 bootMark('script');
 applyTokens();
+// no backdrop-filter (Chrome 68, webOS 5): the glass can't blur, and the blurred veil canvas stalls the GPU at every Down and Up (theme/base.css)
+if (!(window.CSS && CSS.supports && (CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)')))) document.documentElement.classList.add('noblur');
 startLog();
 // SF Pro from the app's folder: put there by a private build, or copied in from the TV's copy (tools/push_sf_font.sh); neither means Geist
 if ('FontFace' in window) {

@@ -473,7 +473,8 @@ export function Home ({rows, topItems, inputs, active, onActivate, showPeriod, o
 		}
 		// only on a change: even a same-value write restyles the rows, and the bar's glass then repaints
 		if (el.style.getPropertyValue('--lower-shift') !== shift + 'px') el.style.setProperty('--lower-shift', shift + 'px');
-	});
+	// only when the focused row or the row count changes: measuring forces a layout, and Left/Right changes neither
+	}, [lower, rowIndex, rows.length]);
 	const overlay = n.zone === 'panel' || n.zone === 'ctx' || n.zone === 'folder';
 	const topPointer = (i: number) => () => { if (!overlay && realPointer.current) { n.mode = 'pointer'; n.engaged = true; n.zone = 'top'; n.topIndex = i; render(); } };
 	const focusedTop = (i: number) => n.engaged && n.zone === 'top' && i === n.topIndex;

@@ -79,7 +79,8 @@
 	transition: transform var(--dur-up) var(--ease-up), opacity var(--dur-fade) ease;
 }
 .rows--lower { transform: translateY(calc(-1 * var(--lower-shift, 300px))); transition: transform var(--dur-down) var(--ease-down), opacity var(--dur-fade) ease; }
-html.wp-video .rows { will-change: transform; }
+/* always a layer: promoted only for the move, every Down and Up rastered the whole stack at its start and end (a hitch on webOS 5) */
+.rows { will-change: transform; }
 /* Hide the dock: the rows slide away */
 .rows--hidden { transform: translateY(1300px); opacity: 0; pointer-events: none; }
 
@@ -134,9 +135,10 @@ html.dockblur .rows > .row:first-child::before { -webkit-backdrop-filter: var(--
 	display: var(--glass-bar-highlight); position: absolute; left: 50%; top: 0; z-index: 0; width: 260px; height: 28px; pointer-events: none;
 	background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.9) 50%, rgba(255, 255, 255, 0)) top / 100% 1.5px no-repeat,
 		radial-gradient(50% 100% at 50% 0, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0)) top / 100% 28px no-repeat;
-	--sel-edge: calc(var(--row-w, 1670px) / 2 - var(--layout-tile-radius) - 130px);
-	transform: translateX(calc(clamp(-1 * var(--sel-edge), var(--sel-x, 0px), var(--sel-edge)) - 130px));
+	transform: translateX(calc(var(--sel-x, 0px) - 130px));
 	opacity: 0; transition: transform var(--dur-scroll) var(--ease-out), opacity 200ms ease;
+	/* a layer of its own for good: made for each slide and dropped after, it repainted the whole glass bar under it twice a move */
+	will-change: transform, opacity;
 }
 .rows > .row:first-child.row--focused > .row__shine { opacity: 1; }
 /* Settings > Liquid glass dock (lib/liquidGlass.ts): the bar bends the picture at its rim (an SVG displacement); over a video it only tints, and it is off while the rows are down */

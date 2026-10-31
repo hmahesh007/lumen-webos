@@ -12,8 +12,9 @@ const REPO_ROOT = resolve(APP_DIR, '..');
 //     because the sandbox serves them with no MIME type, so the bundle must be a
 //     classic script.
 //  2. ES2020 syntax such as `?.` and `??` is a SyntaxError, so everything
-//     (dependencies included) is compiled down to the chrome79 target.
-const BROWSER_TARGET = 'chrome79';
+//     (dependencies included) is compiled down to the target.
+// webOS 5.x (LG NANO81, 2021) runs Chrome 68, older still, so that is the target.
+const BROWSER_TARGET = 'chrome68';
 
 /** Rewrites Vite's module entry tag into a classic deferred script tag. */
 function classicScriptTag (): Plugin {
