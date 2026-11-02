@@ -55,8 +55,10 @@ const GROUPS: {id: OptionGroup; label: string; glyph: GlyphName}[] = [
 	{id: 'wallpaper', label: 'Wallpaper', glyph: 'picture'},
 	{id: 'screensaver', label: 'Screensaver', glyph: 'screensaver'},
 	{id: 'appearance', label: 'Appearance', glyph: 'contrast'},
-	{id: 'photos', label: 'Photos', glyph: 'image'},
+	{id: 'photos', label: 'Immich', glyph: 'image'},
 	{id: 'region', label: 'Language and Region', glyph: 'globe'},
+	{id: 'tv', label: 'Home and Power', glyph: 'power'},
+	{id: 'privacy', label: 'Privacy', glyph: 'eye'},
 	{id: 'system', label: 'System', glyph: 'gear'}
 ];
 const CHOOSE_WALLPAPER = 'choose-wallpaper';

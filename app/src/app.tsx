@@ -25,7 +25,7 @@ import {restoreLeftoverBacklight} from './lib/tvcontrols';
 import {albums as immichAlbums, cachedServer, IMMICH_SOURCES, loadServer, saveServer, testServer, type ImmichServer} from './lib/immich';
 import {Ambient} from './components/Ambient';
 import {setVideoChoice, setVideoPaused, setVideoWallpaper, VIDEO_PLACES} from './lib/wallpaperVideo';
-import {setAmbientFlag, setSaverOffFlag, setVideoFlag, startScreensaver} from './lib/system';
+import {clearSaverOffFlag, setAmbientFlag, setVideoFlag, startScreensaver} from './lib/system';
 import {setFpsCounter} from './lib/fps';
 import {setWhere} from './lib/where';
 import {onMinute} from './lib/minute';
@@ -35,7 +35,9 @@ import {CITIES, COUNTRIES} from './config/cities';
 import {AUTO_PLACE, peekWeather, readWeather, type Weather} from './lib/weather';
 import {useLiveTv} from './hooks/useLiveTv';
 import {channelColor, nowNextAt, rowChannels, type Channel} from './lib/livetv';
-import {openChannel, runningApps, uninstallApp} from './lib/root';
+import {homeSetup, installTvScripts, openChannel, privacy, reboot, runningApps, uninstallApp, type HomeAction, type PrivacyAction} from './lib/root';
+import {appDir, nativeWhy, powerOnPending, powerOnWhy, readTvState, scriptsReady, type TvState} from './lib/tvsetup';
+import {APP_ID} from './config/constants';
 import {bootMark, navMark} from './lib/log';
 import {LANGS, setClockMode, setLang} from './lib/i18n';
 
@@ -53,7 +55,7 @@ const LIVE_INFO_W = 660;
 /** how much higher the Live TV row sits when focused, so its now/next block fits on screen */
 const LIVE_BELOW = 150;
 const MISC = {lgHome: 'lg-home', settings: 'settings'} as const;
-const OPTION = {liveTv: 'live-tv-row', ambient: 'ambient', ambientOn: 'ambient-on', ambientSeconds: 'ambient-seconds', ambientBrightness: 'ambient-brightness', ambientPrint: 'ambient-print', fps: 'fps-counter', restore: 'restore-backup', focus: 'focus-strength', firstRow: 'first-row', videoHours: 'video-hours', dockBlur: 'dock-blur', liquidDock: 'liquid-dock', reduceMotion: 'reduce-motion', hideNames: 'hide-names', showRecents: 'show-recents', dockHide: 'dock-hide', showAmPm: 'show-ampm', showAll: 'show-all-apps', weather: 'show-weather', homeCast: 'home-forecast', saverCast: 'saver-forecast', immichUrl: 'immich-url', immichKey: 'immich-key', immichTest: 'immich-test', city: 'weather-city', country: 'weather-country', idle: 'idle-screensaver', wpAuto: 'wp-auto', immichDays: 'immich-recent-days', wpType: 'wp-type', wpNew: 'wp-new', nightDim: 'night-dim', dockDim: 'dock-dim', captions: 'wallpaper-captions', darkMode: 'dark-mode', language: 'language', clock: 'clock-format'} as const;
+const OPTION = {liveTv: 'live-tv-row', ambient: 'ambient', ambientOn: 'ambient-on', saverShow: 'saver-show', ambientSeconds: 'ambient-seconds', ambientBrightness: 'ambient-brightness', ambientPrint: 'ambient-print', fps: 'fps-counter', restore: 'restore-backup', focus: 'focus-strength', firstRow: 'first-row', videoHours: 'video-hours', dockBlur: 'dock-blur', liquidDock: 'liquid-dock', reduceMotion: 'reduce-motion', hideNames: 'hide-names', showRecents: 'show-recents', dockHide: 'dock-hide', showAmPm: 'show-ampm', showAll: 'show-all-apps', weather: 'show-weather', homeCast: 'home-forecast', saverCast: 'saver-forecast', immichUrl: 'immich-url', immichKey: 'immich-key', immichTest: 'immich-test', city: 'weather-city', country: 'weather-country', idle: 'idle-screensaver', wpAuto: 'wp-auto', immichDays: 'immich-recent-days', wpType: 'wp-type', wpNew: 'wp-new', nightDim: 'night-dim', dockDim: 'dock-dim', captions: 'wallpaper-captions', darkMode: 'dark-mode', language: 'language', clock: 'clock-format', tvScripts: 'tv-scripts', tvHome: 'tv-home', tvPowerOn: 'tv-power-on', tvRestart: 'tv-restart', pvAgreements: 'privacy-agreements', pvLmt: 'privacy-lmt', pvLivePlus: 'privacy-liveplus', pvHosts: 'privacy-hosts', pvServices: 'privacy-services', pvUpdates: 'privacy-updates'} as const;
 const WP_AUTO_CHOICES = [0, 0.5, 1, 5, 15, 30, 60];   // minutes
 /** when the video wallpaper plays (Settings > Wallpaper > Video wallpaper hours): [first hour, hour it stops]; always = no limit */
 const VIDEO_HOURS: Record<string, [number, number]> = {day: [7, 19], evening: [17, 23], night: [19, 7]};
@@ -79,12 +81,113 @@ const TOP_ITEMS: TileModel[] = [
 ];
 
 
+const LUMEN_IDS = ['com.samrenfrew.lumen', 'com.samrenfrew.lumen.dev'];
+const NEEDS_SCRIPTS = 'Install the TV scripts first, in Settings > System > TV scripts. ';
+
+/** Settings > Home and Power and Settings > Privacy: one row per TV-script setting, each showing what the TV reports. */
+function tvOptions (tv: TvState | null, busy: string): OptionItem[] {
+	const ready = scriptsReady(tv);
+	/** the value shown: Working while it changes, Checking before the first read, and the script's state after */
+	const shown = (id: string, value: string) => busy === id ? 'Working' : !tv ? (isWebOS() ? 'Checking' : 'Not on a TV') : !ready ? 'Needs TV scripts' : value;
+	const pre = tv && !ready ? NEEDS_SCRIPTS : '';
+	const onOff = (v: string) => v === 'on' ? 'On' : v === 'off' ? 'Off' : 'Not on this TV';
+	const rows: OptionItem[] = [];
+	const lumenHome = !!tv && LUMEN_IDS.indexOf(tv.home) >= 0;
+	const nWhy = tv ? nativeWhy(tv) : '';
+	rows.push({
+		id: OPTION.tvHome, group: 'tv', label: 'Home button opens',
+		description: pre + (nWhy && !lumenHome ? nWhy : "Which app LG's own Home routes open: the Home button, Exit, and Back out of an app. Lumen's LG Home button still opens LG Home. LG Input Hook can keep its Home mapping."),
+		value: lumenHome,
+		valueText: shown(OPTION.tvHome, lumenHome ? 'Lumen' : nWhy ? 'Not available' : 'LG Home')
+	});
+	const pWhy = tv ? powerOnWhy(tv) : '';
+	const powerLumen = !!tv && LUMEN_IDS.indexOf(tv.powerOn) >= 0;
+	const pending = powerOnPending(tv);
+	rows.push({
+		id: OPTION.tvPowerOn, group: 'tv', label: 'When the TV turns on',
+		description: pre + (pWhy && !powerLumen ? pWhy : 'Lumen: the power button and a start after a power cut open Lumen first, before Live TV is drawn. Casting, Wake-on-LAN and HDMI-CEC still go where they ask. Takes effect after the TV restarts.'),
+		value: powerLumen,
+		valueText: shown(OPTION.tvPowerOn, (powerLumen ? 'Lumen' : pWhy ? 'Not available' : 'Last input') + (pending ? ' (after a restart)' : ''))
+	});
+	if (pending) rows.push({
+		id: OPTION.tvRestart, group: 'tv', label: 'Restart the TV now',
+		description: 'The TV reads what it opens at power-on only when it starts. This restarts it now.',
+		value: false, valueText: shown(OPTION.tvRestart, 'Restart')
+	});
+
+	const a = tv ? tv.agreements : null;
+	rows.push({
+		id: OPTION.pvAgreements, group: 'privacy', label: 'LG data agreements',
+		description: pre + (tv && !tv.node ? 'This TV has no node to change them safely. ' : '') + "Withdraws LG's optional agreements: screen recognition, ads based on what you watch, personalised ads, ad cookies, sharing with data partners, extra usage data, remote diagnostics and marketing. Voice and the terms of use stay. OK again puts back what was there before.",
+		value: a === 0,
+		valueText: shown(OPTION.pvAgreements, a === null ? 'Unknown' : a === 0 ? 'Withdrawn' : `${a} given`)
+	});
+	rows.push({
+		id: OPTION.pvLmt, group: 'privacy', label: 'Limit ad tracking',
+		description: pre + "The TV's own setting: apps are asked not to use its advertising ID to profile you.",
+		value: !!tv && tv.lmt === 'on', valueText: shown(OPTION.pvLmt, onOff(tv ? tv.lmt : ''))
+	});
+	rows.push({
+		id: OPTION.pvLivePlus, group: 'privacy', label: 'Live Plus',
+		description: pre + "LG's screen recognition: it samples what is on screen, from apps and HDMI alike, to work out what you watch. Off is the private choice.",
+		value: !!tv && tv.livePlus === 'on', valueText: shown(OPTION.pvLivePlus, onOff(tv ? tv.livePlus : ''))
+	});
+	rows.push({
+		id: OPTION.pvHosts, group: 'privacy', label: 'Block LG ad servers',
+		description: pre + (tv && !tv.hostsWritable ? "This TV's /etc/hosts cannot be written, so nothing can be blocked. " : '') + "Blocks LG's ad, tracking and screen recognition servers on the TV itself. The Content Store, app updates and streaming apps keep working.",
+		value: !!tv && tv.hosts, valueText: shown(OPTION.pvHosts, tv && tv.hosts ? 'On' : 'Off')
+	});
+	rows.push({
+		id: OPTION.pvServices, group: 'privacy', label: 'Stop LG tracking services',
+		description: pre + "Stops LG's log uploaders, suggestion and screen recognition services, and stops them again at each start. Frees about 10 MB. LG's ad service stays, as some streaming apps wait for it." + (tv && tv.services && tv.servicesRunning ? ` ${tv.servicesRunning} still running.` : ''),
+		value: !!tv && tv.services, valueText: shown(OPTION.pvServices, tv && tv.services ? 'On' : 'Off')
+	});
+	rows.push({
+		id: OPTION.pvUpdates, group: 'privacy', label: 'Block TV software updates',
+		description: pre + 'A software update can remove root, and with it Lumen\'s TV scripts. This is the Homebrew Channel\'s own switch, and takes effect after the TV restarts.',
+		value: !!tv && tv.updates, valueText: shown(OPTION.pvUpdates, tv && tv.updates ? 'On' : 'Off')
+	});
+	return rows;
+}
+
+/** OK on a TV-script row. False when the row is not one of them. */
+function onTvOption (id: string, tv: TvState | null, run: (id: string, job: () => Promise<string>) => void, toast: (text: string, kind?: 'info' | 'error') => void): boolean {
+	if (id === OPTION.tvScripts) {
+		if (!tv) { toast(isWebOS() ? 'Still checking the TV' : 'Only on the TV'); return true; }
+		if (tv.scripts === 'unshipped') { toast('This build has no TV scripts in it', 'error'); return true; }
+		run(id, () => installTvScripts(appDir()).then((ok) => ok ? 'TV scripts installed' : 'Could not install the TV scripts'));
+		return true;
+	}
+	const home: Record<string, HomeAction> = {};
+	const pv: Record<string, PrivacyAction> = {};
+	if (id === OPTION.tvHome) home[id] = tv && LUMEN_IDS.indexOf(tv.home) >= 0 ? 'nativeOff' : 'nativeOn';
+	else if (id === OPTION.tvPowerOn) home[id] = tv && LUMEN_IDS.indexOf(tv.powerOn) >= 0 ? 'powerOnOff' : 'powerOnOn';
+	else if (id === OPTION.pvAgreements) pv[id] = tv && tv.agreements === 0 ? 'agreementsRestore' : 'agreementsOff';
+	else if (id === OPTION.pvLmt) pv[id] = tv && tv.lmt === 'on' ? 'lmtOff' : 'lmtOn';
+	else if (id === OPTION.pvLivePlus) pv[id] = tv && tv.livePlus === 'on' ? 'livePlusOff' : 'livePlusOn';
+	else if (id === OPTION.pvHosts) pv[id] = tv && tv.hosts ? 'hostsOff' : 'hostsOn';
+	else if (id === OPTION.pvServices) pv[id] = tv && tv.services ? 'servicesOff' : 'servicesOn';
+	else if (id === OPTION.pvUpdates) pv[id] = tv && tv.updates ? 'updatesOff' : 'updatesOn';
+	else if (id !== OPTION.tvRestart) return false;
+	if (!tv) { toast(isWebOS() ? 'Still checking the TV' : 'Only on the TV'); return true; }
+	if (!scriptsReady(tv)) { toast(NEEDS_SCRIPTS.trim()); return true; }
+	if (id === OPTION.tvRestart) { run(id, () => reboot().then(() => 'Restarting the TV')); return true; }
+	if (id === OPTION.tvHome && home[id] === 'nativeOn' && nativeWhy(tv)) { toast(nativeWhy(tv), 'error'); return true; }
+	if (id === OPTION.tvPowerOn && home[id] === 'powerOnOn' && powerOnWhy(tv)) { toast(powerOnWhy(tv), 'error'); return true; }
+	// what the settings service does with a key it never had is untried, so a setting the TV lacks is never written
+	if ((id === OPTION.pvLmt && !tv.lmt) || (id === OPTION.pvLivePlus && !tv.livePlus)) { toast('This TV has no such setting'); return true; }
+	if (id === OPTION.pvAgreements && tv.agreements === 0 && !tv.backup) { toast('Already withdrawn. LG\'s own menus can give them again.'); return true; }
+	if (home[id]) run(id, () => homeSetup(home[id], APP_ID));
+	else run(id, () => privacy(pv[id]));
+	return true;
+}
+
 export function App () {
 	// opened by watch.sh for the TV's screensaver: the first frame is the screensaver, so the home screen never shows first
 	const [screen, setScreen] = useState<Screen>(() => import.meta.env.DEV && /[?&]settings/.test(location.search) ? 'settings' : startParams().view === 'ambient' && loadConfig().ambientOn ? 'ambient' : 'home');
-	// Immich (Settings > Photos): whether a server is set up on the TV, and its albums; read again each time Settings opens
+	// Immich (Settings > Immich): whether a server is set up on the TV, and its albums; read again each time Settings opens
 	const [immich, setImmich] = useState<{ready: boolean; albums: {id: string; title: string}[]}>({ready: !!cachedServer(), albums: []});
-	// Settings > Photos: the address and key being typed, and how the last Test connection went
+	// Settings > Immich: the address and key being typed, and how the last Test connection went
 	const [immichDraft, setImmichDraft] = useState<ImmichServer>(() => cachedServer() || {url: '', key: ''});
 	const [immichTest, setImmichTest] = useState<'' | 'testing' | 'failed'>('');
 	useEffect(() => {
@@ -160,12 +263,13 @@ export function App () {
 	// front. Shaking the remote still brings it back.
 	useEffect(() => hidePointerOnForeground(), []);
 
-	// Load apps at start and whenever the Homebrew option changes; refresh inputs whenever
+	// Load apps at start, whenever the Homebrew option changes, and each time Settings opens; refresh inputs whenever
 	// the app comes back to the foreground (labels or connections may have changed).
 	// With a list from the last launch on screen, the first read waits for the first frame; a changed option reads at once.
 	const appsShown = useRef(apps);
 	appsShown.current = apps;
 	const firstAppsRead = useRef(true);
+	const readApps = useRef<() => void>(() => undefined);
 	useEffect(() => {
 		const useHomebrew = config.useHomebrew;
 		const showAll = config.showAllApps;
@@ -177,11 +281,14 @@ export function App () {
 				if (useHomebrew && source !== 'homebrew') showToast('Homebrew Channel not available, using the built-in app list', 'error');
 			})
 			.catch(() => showToast('Could not read the app list', 'error'));
+		readApps.current = read;
 		const wait = firstAppsRead.current && apps.length > 0;
 		firstAppsRead.current = false;
 		if (!wait) { read(); return undefined; }
 		return afterFirstFrame(read);
 	}, [config.useHomebrew, config.showAllApps, showToast]);
+	// Lumen stays running for days, so an app installed meanwhile shows in Settings only if the list is read again there
+	useEffect(() => { if (screen === 'settings') readApps.current(); }, [screen]);
 
 	useEffect(() => {
 		const refresh = () => {
@@ -276,7 +383,7 @@ export function App () {
 	const ambientOpening = useRef<ReturnType<typeof shownWallpaper>>(null);
 	useEffect(() => setVideoWallpaper(videoOn), [videoOn]);
 	useEffect(() => { setAmbientFlag(config.ambientOn); }, [config.ambientOn]);
-	useEffect(() => { setSaverOffFlag(config.saverOff); }, [config.saverOff]);
+	useEffect(() => { clearSaverOffFlag(); }, []);
 	useEffect(() => { setVideoPaused(screen !== 'home'); document.documentElement.classList.toggle('in-settings', screen === 'settings' || screen === 'guide'); }, [screen]);
 	const lastScreen = useRef(screen);
 	useEffect(() => { if (lastScreen.current !== screen) navMark(`${lastScreen.current}>${screen}`); lastScreen.current = screen; }, [screen]);
@@ -294,16 +401,15 @@ export function App () {
 	}, [apps, restoring]);
 	const allApps = useMemo(() => withBuiltins(apps), [apps]);
 
-	/** Your photos straight away, without LG's screensaver showing first; LG's own when the photos are not turned on (unless forced, from Control Center). */
-	const showScreensaver = (photos = configRef.current.ambientOn) => {
-		if (photos && cachedServer()) { ambientOpening.current = videoOnRef.current ? null : shownWallpaper(); setScreen('ambient'); return; }
-		if (photos) { showToast('Set up Immich first, in Settings > Photos', 'error'); return; }
+	/** Lumen's screensaver straight away, without LG's showing first; LG's own when Lumen's is not chosen (unless forced, from Control Center). */
+	const showScreensaver = (lumen = configRef.current.ambientOn) => {
+		if (lumen) { ambientOpening.current = videoOnRef.current ? null : shownWallpaper(); setScreen('ambient'); return; }
 		startScreensaver().catch(() => showToast("Couldn't start the screensaver (it needs the Homebrew Channel)", 'error'));
 	};
 
 	// idle screensaver: after the chosen time on the home screen without a key press or pointer move, while the launcher is in front
 	useEffect(() => {
-		if (!config.idleSeconds || config.saverOff || videoOn || screen !== 'home' || controls) return;   // no screensaver of our own while the video plays
+		if (!config.ambientOn || !config.idleSeconds || videoOn || screen !== 'home' || controls) return;   // no screensaver of our own while the video plays
 		let timer = 0;
 		const arm = () => {
 			window.clearTimeout(timer);
@@ -313,7 +419,7 @@ export function App () {
 		const events = ['keydown', 'mousemove', 'click'];
 		events.forEach((e) => window.addEventListener(e, arm));
 		return () => { window.clearTimeout(timer); events.forEach((e) => window.removeEventListener(e, arm)); };
-	}, [config.idleSeconds, config.saverOff, videoOn, screen, controls]);
+	}, [config.ambientOn, config.idleSeconds, videoOn, screen, controls]);
 	useEffect(() => { setVideoFlag(videoOn); }, [videoOn]);
 
 	// ----- derived rows -----
@@ -368,6 +474,24 @@ export function App () {
 
 	// Settings' tabs are only built while Settings is open
 	const inSettings = screen === 'settings';
+
+	// Settings > Home and Power, Privacy and System > TV scripts: the TV's state, read when Settings opens and after each change (lib/tvsetup.ts)
+	const [tv, setTv] = useState<TvState | null>(null);
+	const [tvBusy, setTvBusy] = useState('');
+	const tvBusyRef = useRef('');
+	useEffect(() => { if (inSettings) readTvState().then(setTv); }, [inSettings]);
+	/** Runs one TV-script change: the row shows Working until it is done, then the script's last line shows as a toast and the state is read again. */
+	const runTv = useCallback((id: string, job: () => Promise<string>) => {
+		if (tvBusyRef.current) return;
+		tvBusyRef.current = id;
+		setTvBusy(id);
+		const done = () => readTvState().then((s) => { setTv(s); tvBusyRef.current = ''; setTvBusy(''); });
+		job().then((out) => {
+			const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+			const last = lines[lines.length - 1] || 'Done';
+			showToast(last.length > 160 ? last.slice(0, 157) + '...' : last, /refused|could not|cannot|not ours|no node|failed|left .* on/i.test(last) ? 'error' : 'info');
+		}, (e: unknown) => showToast(e instanceof Error ? e.message : String(e), 'error')).then(done, done);
+	}, [showToast]);
 	const tabs: SettingsTab[] = useMemo(() => {
 		if (!inSettings) return [];
 		const list: SettingsTab[] = [
@@ -393,11 +517,15 @@ export function App () {
 		return {
 			[OPTION.country]: {labels: ['Any'].concat(COUNTRIES.map((c) => c.name)), values: [''].concat(COUNTRIES.map((c) => c.code)), now: config.weatherCountry},
 			[OPTION.city]: {labels: ['Not set', 'Auto'].concat(cities), values: ['', AUTO_PLACE].concat(cities), now: config.weatherCity},
-			[OPTION.wpType]: {labels: ['Pictures', 'Video', 'Immich photos', 'Plain'], values: ['pictures', 'video', 'immich', 'plain'], now: config.wallpaperType},
+			// Immich is a choice only once it is connected (Settings > Immich)
+			[OPTION.wpType]: immich.ready
+				? {labels: ['Pictures', 'Video', 'Immich photos', 'Plain'], values: ['pictures', 'video', 'immich', 'plain'], now: config.wallpaperType}
+				: {labels: ['Pictures', 'Video', 'Plain'], values: ['pictures', 'video', 'plain'], now: config.wallpaperType},
 			[OPTION.immichDays]: {labels: ['Last month', 'Last 3 months', 'Last 6 months', 'Last year'], values: [30, 90, 180, 365], now: config.immichRecentDays},
 			[OPTION.wpAuto]: {labels: ['Off', '30 sec', '1 min', '5 min', '15 min', '30 min', '60 min'], values: WP_AUTO_CHOICES, now: config.wpAutoMinutes},
 			[OPTION.dockHide]: {labels: ['Off', 'Down arrow', 'After idle', 'Both'], values: ['off', 'down', 'idle', 'both'], now: config.dockHide},
-			[OPTION.ambientOn]: {labels: ['LG\'s screensaver', 'My photos', 'Off'], values: ['lg', 'photos', 'off'], now: config.saverOff ? 'off' : config.ambientOn ? 'photos' : 'lg'},
+			[OPTION.ambientOn]: {labels: ['Enabled', 'Disabled'], values: ['on', 'off'], now: config.ambientOn ? 'on' : 'off'},
+			[OPTION.saverShow]: {labels: ['Wallpaper pictures', 'Immich photos'], values: ['wallpaper', 'immich'], now: config.saverShow},
 			[OPTION.idle]: {labels: ['Never', '30 seconds', '1 minute', '2 minutes', '5 minutes'], values: IDLE_SECONDS, now: config.idleSeconds},
 			[OPTION.darkMode]: {labels: ['Light', 'Dark', 'Auto'], values: ['off', 'on', 'auto'], now: config.darkMode},
 			[OPTION.language]: {labels: ['Auto'].concat(LANGS.map((l) => l.name)), values: ['auto'].concat(LANGS.map((l) => l.code)), now: config.language},
@@ -429,6 +557,7 @@ export function App () {
 	// each page lists its options in this order (Settings.tsx GROUPS sets the order of the pages)
 	const options: OptionItem[] = useMemo(() => {
 		const stills = config.wallpaperType === 'pictures' || config.wallpaperType === 'immich';
+		const saverImmich = immich.ready && config.saverShow === 'immich';
 		return [
 			// ----- Home Screen -----
 			{
@@ -502,7 +631,7 @@ export function App () {
 				id: OPTION.wpType,
 				group: 'wallpaper' as const,
 				label: 'Wallpaper type',
-				description: 'Pictures from the library, a video, your photos from Immich, or a plain background. Choose wallpaper then picks which ones.',
+				description: immich.ready ? 'Pictures from the library, a video, your Immich photos, or a plain background. Choose wallpaper then picks which ones.' : 'Pictures from the library, a video, or a plain background. Choose wallpaper then picks which ones. Connect Immich in Settings > Immich to use your own photos.',
 				value: true,
 				...listed(OPTION.wpType)
 			},
@@ -510,14 +639,14 @@ export function App () {
 				id: OPTION.wpAuto,
 				group: 'wallpaper' as const,
 				label: 'Change wallpaper automatically',
-				description: 'Shows another of your pictures or photos every 30 seconds to 60 minutes.',
+				description: 'Shows another of your pictures every 30 seconds to 60 minutes.',
 				value: config.wpAutoMinutes > 0,
 				...listed(OPTION.wpAuto)
 			}, {
 				id: OPTION.wpNew,
 				group: 'wallpaper' as const,
 				label: 'New picture on startup',
-				description: 'Opens on another of your pictures or photos each time. Off, it opens on the last one it showed.',
+				description: 'Opens on another of your pictures each time. Off, it opens on the last one it showed.',
 				value: config.wpNewOnLaunch
 			}] : []),
 			...(config.wallpaperType === 'video' ? [{
@@ -542,55 +671,65 @@ export function App () {
 				id: OPTION.ambientOn,
 				group: 'screensaver' as const,
 				label: 'Screensaver',
-				description: immich.ready
-					? 'LG\'s: the TV\'s own screensaver. My photos: your photos from Immich instead, a slow crossfade with the clock; any key returns to the home screen. Off: no screensaver, in any app. The TV\'s own auto power-off still applies.'
-					: 'LG\'s: the TV\'s own screensaver. My photos needs Immich, set up in Settings > Photos. Off: no screensaver, in any app. The TV\'s own auto power-off still applies.',
-				value: !config.saverOff,
+				description: 'Enabled: this app\'s screensaver replaces the TV\'s, a slow crossfade of pictures with the clock; any key returns to the home screen. Disabled: the TV\'s default LG screensaver runs. The TV\'s own auto power-off still applies.',
+				value: config.ambientOn,
 				...listed(OPTION.ambientOn)
 			},
-			...(config.saverOff ? [] : [{
-				id: OPTION.idle,
-				group: 'screensaver' as const,
-				label: 'Start on the home screen after',
-				description: 'Starts the screensaver when the home screen has been left alone this long. The TV\'s own screensaver timer still covers everything else.',
-				value: config.idleSeconds > 0,
-				...listed(OPTION.idle)
-			}]),
-			...(immich.ready && !config.saverOff ? [{
-				id: OPTION.ambient,
-				group: 'screensaver' as const,
-				label: 'Photos',
-				description: 'Which photos the screensaver shows. Pick several and it mixes them. Screensaver in Control Center shows them even with LG\'s screensaver chosen.',
-				value: true,
-				...ambientPicks()
-			}, {
-				id: OPTION.ambientSeconds,
-				group: 'screensaver' as const,
-				label: 'Time on each photo',
-				description: 'How long each photo stays on the screensaver before the next one fades in.',
-				value: true,
-				...listed(OPTION.ambientSeconds)
-			}, {
-				id: OPTION.ambientBrightness,
-				group: 'screensaver' as const,
-				label: 'Brightness',
-				description: 'Turns the TV\'s backlight down while your photos show, and back up when you press a key.',
-				value: config.ambientBrightness !== 'tv',
-				...listed(OPTION.ambientBrightness)
-			}, {
-				id: OPTION.ambientPrint,
-				group: 'screensaver' as const,
-				label: 'Print look',
-				description: 'Makes your photos look like prints on a wall rather than a glowing screen: softer blacks, paper-white whites and a gentle fall of light.',
-				value: config.ambientPrint
-			}, {
-				id: OPTION.saverCast,
-				group: 'screensaver' as const,
-				label: 'Weather widget',
-				description: 'The next few hours of weather on your photos, at the bottom between the clock and the date. Small: the next 6 hours. Large: the weather now with today\'s high and low, and the next 7 hours with the chance of rain. Needs a Weather city.',
-				value: config.saverForecast,
-				...listed(OPTION.saverCast)
-			}] : []),
+			// Disabled: LG's screensaver runs, so none of this app's screensaver options apply
+			...(config.ambientOn ? [
+				{
+					id: OPTION.idle,
+					group: 'screensaver' as const,
+					label: 'Start on the home screen after',
+					description: 'Starts the screensaver when the home screen has been left alone this long. The TV\'s own screensaver timer still covers everything else.',
+					value: config.idleSeconds > 0,
+					...listed(OPTION.idle)
+				},
+				...(immich.ready ? [{
+					id: OPTION.saverShow,
+					group: 'screensaver' as const,
+					label: 'Show',
+					description: 'What the screensaver shows. Wallpaper pictures: the pictures picked in Wallpaper > Choose wallpaper. Immich photos: photos from your Immich server.',
+					value: true,
+					...listed(OPTION.saverShow)
+				}] : []),
+				...(saverImmich ? [{
+					id: OPTION.ambient,
+					group: 'screensaver' as const,
+					label: 'Immich photos',
+					description: 'Which Immich photos the screensaver shows. Pick several and it mixes them.',
+					value: true,
+					...ambientPicks()
+				}] : []),
+				{
+					id: OPTION.ambientSeconds,
+					group: 'screensaver' as const,
+					label: 'Time on each picture',
+					description: 'How long each picture stays on the screensaver before the next one fades in.',
+					value: true,
+					...listed(OPTION.ambientSeconds)
+				}, {
+					id: OPTION.ambientBrightness,
+					group: 'screensaver' as const,
+					label: 'Brightness',
+					description: 'Turns the TV\'s backlight down while the screensaver shows, and back up when you press a key.',
+					value: config.ambientBrightness !== 'tv',
+					...listed(OPTION.ambientBrightness)
+				}, {
+					id: OPTION.ambientPrint,
+					group: 'screensaver' as const,
+					label: 'Print look',
+					description: 'Makes the pictures look like prints on a wall rather than a glowing screen: softer blacks, paper-white whites and a gentle fall of light.',
+					value: config.ambientPrint
+				}, {
+					id: OPTION.saverCast,
+					group: 'screensaver' as const,
+					label: 'Weather widget',
+					description: 'The next few hours of weather on the screensaver, at the bottom between the clock and the date. Small: the next 6 hours. Large: the weather now with today\'s high and low, and the next 7 hours with the chance of rain. Needs a Weather city.',
+					value: config.saverForecast,
+					...listed(OPTION.saverCast)
+				}
+			] : []),
 
 			// ----- Appearance -----
 			{
@@ -647,7 +786,7 @@ export function App () {
 				id: OPTION.immichTest,
 				group: 'photos' as const,
 				label: 'Test connection',
-				description: 'Checks the address and the key with your server. When it passes, Lumen saves them on the TV and your photos can be the wallpaper and the screensaver.',
+				description: 'Checks the address and the key with your server. When it passes, Lumen saves them on the TV and your Immich photos can be the wallpaper and the screensaver.',
 				value: immich.ready,
 				valueText: immichTest === 'testing' ? 'Testing' : immichTest === 'failed' ? 'Failed' : immich.ready ? 'Connected' : 'Not connected'
 			},
@@ -655,7 +794,7 @@ export function App () {
 				id: OPTION.immichDays,
 				group: 'photos' as const,
 				label: 'Recent photos from',
-				description: 'How far back the Recent and Recent, with people photos reach, for the wallpaper and the screensaver.',
+				description: 'How far back the Recent and Recent, with people sources reach, for the wallpaper and the screensaver.',
 				value: true,
 				...listed(OPTION.immichDays)
 			}] : []),
@@ -701,7 +840,18 @@ export function App () {
 				...listed(OPTION.city, config.weatherCity)
 			},
 
+			// ----- Home and Power, Privacy (the TV scripts: tools/tv/home-setup.sh, tools/tv/privacy.sh) -----
+			...tvOptions(tv, tvBusy),
+
 			// ----- System -----
+			{
+				id: OPTION.tvScripts,
+				group: 'system' as const,
+				label: 'TV scripts',
+				description: "The scripts Lumen runs on the TV as root: the Home button watcher, Home and Power, and Privacy. They ship inside Lumen; this copies this build's into place and restarts them. Needs the Homebrew Channel with root.",
+				value: !!tv && tv.scripts === 'ok',
+				valueText: tvBusy === OPTION.tvScripts ? 'Working' : !tv ? (isWebOS() ? 'Checking' : 'Not on a TV') : tv.scripts === 'ok' ? 'Up to date' : tv.scripts === 'old' ? 'Update' : tv.scripts === 'missing' ? 'Install' : 'Not in this build'
+			},
 			{
 				id: OPTION.showAll,
 				group: 'system' as const,
@@ -731,7 +881,7 @@ export function App () {
 				value: config.liquidDock
 			}] : [])
 		];
-	}, [config, choices, immich.ready, immichDraft, immichTest]);
+	}, [config, choices, immich.ready, immichDraft, immichTest, tv, tvBusy]);
 
 	const wallpaper: WallpaperTab = useMemo(() => {
 		if (!inSettings) return {categories: [], entries: [], onPick: () => undefined};
@@ -753,17 +903,17 @@ export function App () {
 		}
 		if (type === 'immich') {
 			if (immich.ready) {
-				IMMICH_SOURCES.forEach((src) => entries.push({key: src.key, title: src.title, category: 'Photos', on: config.immichPicks.indexOf(src.key) >= 0}));
-				immich.albums.forEach((a) => entries.push({key: `immich:album:${a.id}`, title: a.title, category: 'Photos', on: config.immichPicks.indexOf(`immich:album:${a.id}`) >= 0}));
+				IMMICH_SOURCES.forEach((src) => entries.push({key: src.key, title: src.title, category: 'Immich', on: config.immichPicks.indexOf(src.key) >= 0}));
+				immich.albums.forEach((a) => entries.push({key: `immich:album:${a.id}`, title: a.title, category: 'Immich', on: config.immichPicks.indexOf(`immich:album:${a.id}`) >= 0}));
 			} else {
-				entries.push({key: 'immich:setup', title: 'Set up Immich', category: 'Photos', label: 'Set up'});
+				entries.push({key: 'immich:setup', title: 'Set up Immich', category: 'Immich', label: 'Set up'});
 			}
 			return {
-				categories: ['Photos'],
+				categories: ['Immich'],
 				entries,
 				summary: 'Pick which of your Immich photos the home screen shows.',
 				onPick: (key: string) => {
-					if (key === 'immich:setup') { showToast('Set up Immich first, in Settings > Photos'); return; }
+					if (key === 'immich:setup') { showToast('Set up Immich first, in Settings > Immich'); return; }
 					const has = config.immichPicks.indexOf(key) >= 0;
 					if (has && config.immichPicks.length === 1) { showToast('Keep at least one source'); return; }
 					updateConfig({...config, immichPicks: has ? config.immichPicks.filter((x) => x !== key) : config.immichPicks.concat(key)});
@@ -873,7 +1023,7 @@ export function App () {
 		}
 	}, [config, inputs, live.channels]);
 
-	/** Settings > Photos > Test connection: on a pass the address and key are saved on the TV and the photo options open up */
+	/** Settings > Immich > Test connection: on a pass the address and key are saved on the TV and the Immich options open up */
 	const testImmich = useCallback(() => {
 		setImmichTest('testing');
 		testServer(immichDraft).then((result) => {
@@ -895,6 +1045,7 @@ export function App () {
 	}, []);
 
 	const onOption = useCallback((optionId: string) => {
+		if (onTvOption(optionId, tv, runTv, showToast)) return;
 		if (optionId === OPTION.restore) {
 			readBackup().then((saved) => {
 				if (!saved) { showToast('No settings backup found on the TV', 'error'); return; }
@@ -918,7 +1069,7 @@ export function App () {
 		else if (optionId === OPTION.captions) updateConfig({...config, wallpaperCaptions: !config.wallpaperCaptions});
 		else if (optionId === OPTION.ambientPrint) updateConfig({...config, ambientPrint: !config.ambientPrint});
 		else if (optionId === OPTION.wpNew) updateConfig({...config, wpNewOnLaunch: !config.wpNewOnLaunch});
-	}, [config, immich.ready, testImmich]);
+	}, [config, immich.ready, testImmich, tv, runTv, showToast]);
 
 	/** a value picked from an option's pop-up list */
 	const onChoose = useCallback((optionId: string, index: number) => {
@@ -939,9 +1090,9 @@ export function App () {
 		else if (optionId === OPTION.wpType) updateConfig({...c, wallpaperType: v});
 		else if (optionId === OPTION.dockHide) updateConfig({...c, dockHide: v});
 		else if (optionId === OPTION.ambientOn) {
-			if (v === 'photos' && !cachedServer()) { showToast('Set up Immich first, in Settings > Photos'); return; }
-			updateConfig({...c, ambientOn: v === 'photos', saverOff: v === 'off'});
+			updateConfig({...c, ambientOn: v === 'on'});
 		}
+		else if (optionId === OPTION.saverShow) updateConfig({...c, saverShow: v});
 		else if (optionId === OPTION.idle) updateConfig({...c, idleSeconds: Number(value)});
 		else if (optionId === OPTION.darkMode) updateConfig({...c, darkMode: v});
 		else if (optionId === OPTION.language) updateConfig({...c, language: v});
@@ -973,7 +1124,7 @@ export function App () {
 		<>
 			{/* Home stays mounted under Settings so it keeps its focus position. */}
 			<Home rows={rows} tiles={TILES_FOR[firstRow] || TILES_FOR[6]} perRow={firstRow} topItems={TOP_ITEMS} inputs={shownInputs.map(inputTile)} active={screen === 'home' && !controls} onActivate={onActivate} showPeriod={config.showAmPm} onEdit={onEdit} folders={folderMap} weather={weather} weatherLine={config.showWeather && !(config.homeForecast && config.homeForecastSize === 'large')} forecast={config.homeForecast ? config.homeForecastSize as 'small' | 'large' : undefined} dockHide={config.dockHide} dockDim={config.dockDim} captions={config.wallpaperCaptions} focusRow={focusRow} />
-			{screen === 'ambient' && <Ambient source={config.ambient} seconds={config.ambientSeconds} backlight={AMBIENT_BACKLIGHT[config.ambientBrightness]} weather={weather} weatherLine={config.showWeather && !(config.saverForecast && config.saverForecastSize === 'large')} forecast={config.saverForecast ? config.saverForecastSize as 'small' | 'large' : undefined} showPeriod={config.showAmPm} print={config.ambientPrint} opening={ambientOpening.current} onExit={() => setScreen('home')} />}
+			{screen === 'ambient' && <Ambient show={config.saverShow} source={config.ambient} pictures={config.wallpaperPicks} seconds={config.ambientSeconds} backlight={AMBIENT_BACKLIGHT[config.ambientBrightness]} weather={weather} weatherLine={config.showWeather && !(config.saverForecast && config.saverForecastSize === 'large')} forecast={config.saverForecast ? config.saverForecastSize as 'small' | 'large' : undefined} showPeriod={config.showAmPm} print={config.ambientPrint} opening={ambientOpening.current} onExit={() => setScreen('home')} />}
 			{screen === 'guide' && <Guide channels={live.channels} listings={live.listings} logos={live.logos} now={live.now} schedule={live.schedule} pending={live.pending} full={config.guideFull} onMode={(full) => { if (configRef.current.guideFull !== full) updateConfig({...configRef.current, guideFull: full}); }} active={!controls} onOpen={watchChannel} onClose={() => setScreen('home')} />}
 			{screen === 'settings' && <Settings tabs={tabs} wallpaper={wallpaper} options={options} active onToggle={onToggle} onReorder={onReorder} onOption={onOption} onChoose={onChoose} onText={onText} onClose={() => setScreen('home')} />}
 			{controls && <ControlCenter

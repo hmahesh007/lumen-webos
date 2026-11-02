@@ -15,7 +15,7 @@ This repository is a personal fork of [ammar027/lumen-webos](https://github.com/
 
 Lumen is tested on this one TV only. Other webOS TVs may work, but nobody has checked them.
 
-The original project was written for an LG 65UQ8040PSB on webOS 22 (Chromium 87). Some rules in the code were tuned for that TV. This fork treats each of those rules as an assumption until it works on the TV above. [PLAN.md](PLAN.md) lists what is still to verify.
+The original project was written for an LG 65UQ8040PSB on webOS 22 (Chromium 87). Some rules in the code were tuned for that TV. This fork treats each of those rules as an assumption until it works on the TV above. [docs/plans/PLAN.md](docs/plans/PLAN.md) lists what is still to verify.
 
 The build still targets `chrome79` and a classic script, not a module. The TV's graphics chip is weak, so only `transform` and `opacity` animate.
 
@@ -28,13 +28,13 @@ The build still targets `chrome79` and a classic script, not a module. The TV's 
 
 ## What this fork adds
 
-These are the main changes since the fork. [PLAN.md](PLAN.md) has the full list and the status of each item.
+These are the main changes since the fork. [docs/plans/PLAN.md](docs/plans/PLAN.md) has the full list and the status of each item.
 
-- **Live TV.** A row of aerial channels with what is on now, a Now and Next guide, and a full week's guide. The Guide button on the remote can open it. See [docs/live-tv.md](docs/live-tv.md) and [docs/live-tv-build.md](docs/live-tv-build.md).
+- **Live TV.** A row of aerial channels with what is on now, a Now and Next guide, and a full week's guide. The Guide button on the remote can open it. See [docs/research/live-tv.md](docs/research/live-tv.md) and [docs/plans/live-tv-build.md](docs/plans/live-tv-build.md).
 - **Immich photos.** Your own photos from an Immich server as the wallpaper and as a screensaver. Portrait photos show in pairs. See [docs/immich.md](docs/immich.md).
 - **Photo screensaver.** It starts after a set time on the home screen, or from Art mode in the Control Center. It can dim the backlight and has a Print look for paintings.
 - **Control Center.** One grid of tvOS-sized glass controls. Sound, Picture, Theme and Clock open a list of choices, as on tvOS 26.
-- **Settings.** A stack of pages in the Apple TV layout, not tabs. See [docs/settings-redesign.md](docs/settings-redesign.md).
+- **Settings.** A stack of pages in the Apple TV layout, not tabs. See [docs/plans/settings-redesign.md](docs/plans/settings-redesign.md).
 - **Glass.** A light live blur on the dock and the top buttons, a colour fringe on the dock rim, and a highlight that follows focus. Settings > Appearance > Dock blur turns the dock blur on or off.
 - **Open apps.** A dot above each app that is still open in the background. Lumen opens with no launch screen and comes back from other apps faster. See [docs/keep-alive.md](docs/keep-alive.md).
 - **Wallpapers.** An Art category of 110 paintings, 300 more landscapes, and a title and credit for each picture.
@@ -75,14 +75,13 @@ The Channel installs only the app. Some features also need the scripts in [tools
 
 - Lumen opens again after the TV wakes.
 - The Recent row.
-- Settings > Screensaver > My photos replaces LG's screensaver.
-- Settings > Screensaver > Off ends LG's screensaver.
+- Settings > Screensaver > Enabled replaces LG's screensaver with this app's. It shows your wallpaper pictures, or your Immich photos when Immich is connected.
 
 To install the scripts, run these commands from a copy of this repository. Replace `<tv-ip>` with your TV's address.
 
 ```sh
 ssh root@<tv-ip> 'mkdir -p /var/lib/homehook /var/lib/webosbrew/init.d'
-scp tools/tv/watch.sh tools/tv/stadia.sh root@<tv-ip>:/var/lib/homehook/
+scp tools/tv/watch.sh tools/tv/stadia.sh tools/tv/home-setup.sh root@<tv-ip>:/var/lib/homehook/
 scp tools/tv/60-homehook root@<tv-ip>:/var/lib/webosbrew/init.d/
 ssh root@<tv-ip> 'chmod +x /var/lib/homehook/*.sh /var/lib/webosbrew/init.d/60-homehook && /var/lib/webosbrew/init.d/60-homehook'
 ```
@@ -94,6 +93,8 @@ To remove the scripts, run `rm /var/lib/webosbrew/init.d/60-homehook` on the TV,
 ### Open Lumen with the Home button
 
 Use LG Input Hook to map the Home button to the app `com.samrenfrew.lumen`.
+
+Settings > Home and Power can make LG's own Home routes (Exit, Back out of an app) open Lumen too, and the TV start on Lumen when it is switched on. See [docs/home-and-power-on.md](docs/home-and-power-on.md). Settings > Privacy withdraws LG's data agreements and blocks its ad servers and tracking services; see [docs/privacy.md](docs/privacy.md). Both need the TV scripts, which Settings > System > TV scripts installs from the app. Neither is tested on the TV above yet.
 
 If you do not use Input Hook, `watch.sh` can do this instead. Create the file `/var/lib/homehook/home-takeover` on the TV. When LG Home opens, the script then opens Lumen. This is slower than Input Hook, because LG Home shows for a moment first.
 
@@ -143,7 +144,7 @@ This command type checks, builds Lumen as `com.samrenfrew.lumen` with the dev to
 
 `npm run deploy` installs a second copy, `com.samrenfrew.lumen.dev` ("Home Dev"), next to the main one. The Home button does not open this copy.
 
-After each start, a dev build writes a "boot" line to `/var/lib/homehook/lumen.log` on the TV. [docs/startup-perf.md](docs/startup-perf.md) tells you how to read it.
+After each start, a dev build writes a "boot" line to `/var/lib/homehook/lumen.log` on the TV. [docs/research/startup-perf.md](docs/research/startup-perf.md) tells you how to read it.
 
 ### Other build commands
 
@@ -196,13 +197,13 @@ The TV's graphics chip is the main limit on this project. These documents record
 
 | Document | What it covers |
 |---|---|
-| [RESEARCH.md](RESEARCH.md) | tvOS design rules, Liquid Glass, TV browser performance, and the cost of each glass effect on this TV. |
-| [docs/frame-rate.md](docs/frame-rate.md) | What limits the frame rate (the GPU draw of each frame), and the scripts that measure it. |
-| [docs/down-up-lag-review.md](docs/down-up-lag-review.md) | A review of the lag on Down and Up, and the test results that got it to about 40 fps. |
-| [docs/startup-perf.md](docs/startup-perf.md) | The cold-start freeze, its fix, and how to read the boot timeline. |
+| [docs/research/RESEARCH.md](docs/research/RESEARCH.md) | tvOS design rules, Liquid Glass, TV browser performance, and the cost of each glass effect on this TV. |
+| [docs/research/frame-rate.md](docs/research/frame-rate.md) | What limits the frame rate (the GPU draw of each frame), and the scripts that measure it. |
+| [docs/research/down-up-lag-review.md](docs/research/down-up-lag-review.md) | A review of the lag on Down and Up, and the test results that got it to about 40 fps. |
+| [docs/research/startup-perf.md](docs/research/startup-perf.md) | The cold-start freeze, its fix, and how to read the boot timeline. |
 | [docs/keep-alive.md](docs/keep-alive.md) | How to keep apps and Lumen open when you change apps. |
-| [docs/spikes.md](docs/spikes.md) | Short tests on the TV, one for each open question in the plan. |
-| [docs/live-tv.md](docs/live-tv.md) | How to read the channel list, the logos and the guide, and how to tune a channel. |
+| [docs/research/spikes.md](docs/research/spikes.md) | Short tests on the TV, one for each open question in the plan. |
+| [docs/research/live-tv.md](docs/research/live-tv.md) | How to read the channel list, the logos and the guide, and how to tune a channel. |
 
 The main findings:
 

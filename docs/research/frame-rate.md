@@ -50,7 +50,7 @@ With frames on time, Down and Up felt too quick, so they now take 600 ms each, a
 
 ## Down and Up, 2026-10-23
 
-The full-screen blurred backdrop (`.lowerveil`) was rastered again 2 to 3 times on every Down and Up, because the TV's memory pressure makes Chromium drop its tiles. It is now a canvas, which has no tiles, and the bar and first grid row tiles keep a layer each. Down and Up went from about 10 fps to about 40 fps. The full table is in `docs/down-up-lag-review.md`. Note: `walk.mjs vert` starts with focus on the top buttons, so its Down and Up move between the top buttons and the dock, not into the grid.
+The full-screen blurred backdrop (`.lowerveil`) was rastered again 2 to 3 times on every Down and Up, because the TV's memory pressure makes Chromium drop its tiles. It is now a canvas, which has no tiles, and the bar and first grid row tiles keep a layer each. Down and Up went from about 10 fps to about 40 fps. The full table is in `docs/research/down-up-lag-review.md`. Note: `walk.mjs vert` starts with focus on the top buttons, so its Down and Up move between the top buttons and the dock, not into the grid.
 
 ## The overall fix
 
@@ -74,6 +74,23 @@ The panel opened on default values (backlight 100, Eye Comfort off) and redrew w
 
 Opening a list is still the heaviest step: about 65 ms of JS in the key handler and 200 ms of raster for the new options and the pill.
 
+### Lists again (2026-10-26)
+
+After the design cleanup, lists felt laggy again: list close drew 215 ms of raster in 4 frames, and list open 274 ms in 3 frames. The live blur was not the cause: only 2 or 3 controls blur during a list open. `LayerTree.layerPainted` showed that each list open and close repainted all ten controls and all seven choices twice. Tests in the live page found two triggers. A class that sets `opacity` on a control repaints it, even when the value does not change and the control has its own layer. A change of `pointer-events` on a parent repaints all its children too. An opacity animation on the same control repaints nothing. The grid and the list were hidden by such classes (`cc__grid--leaving`, `cc__list--shown`).
+
+The classes are gone. The fades that hide the grid now keep running at their end value while the list is open, and the opened tile is hidden by an animation too. Mouse handlers check the phase instead of `pointer-events`. With the change live: list close 11 ms of raster in 8 frames (worst gap 180 ms to 57 ms), list open 218 ms in 5 frames (worst gap 195 ms to 105 ms).
+
 ## Settings rows (2026-10-26)
 
 Up and Down in a Settings list ran at about 16 to 18 fps. The rows shared one layer with the whole list, so each focus move rastered the full list (about 1000 by 840 px) for one row's zoom and shadow. Each row now has its own layer (`will-change: transform` on `.slist__row`), as the Guide rows do. In `walk.mjs settings`, raster time fell from about 1.1 s to 0.27 s and dropped frames by more than half. Sam: much smoother on the TV.
+
+## Opening Settings, and keeping it built while closed (2026-11-01)
+
+From an idea in Glasshouse: build the other screens while Home is still, so they open faster. A dev-only switch (`lumen.warm` in `app.tsx`) kept Settings built while closed, hidden (`mounted`) or drawn at 1% opacity so its tiles stay rastered (`drawn`). Each open was timed from the nav line: the key press, then the end of the first long frame gap, which is when Settings shows.
+
+- Settings shows about 420 to 470 ms after OK once it has been opened before in the session. About 100 to 170 ms is the page's own work before the switch, and about 250 to 350 ms is the wait for the first frame. Keeping it built did not change this: `mounted` gave about 440 ms, the same as off.
+- The first open after a page reload: about 525 ms with it off, about 480 ms built (three tries each, spread about 60 ms). The difference is inside the spread.
+- The first open after an install took 870 ms. That is the browser's caches being empty, which warm-up does not cover.
+- `drawn` made closing Settings worse: the return to Home gained gaps of 117 to 167 ms, where off had none.
+
+Not worth it: building Settings is not where the time goes. The Guide was not tried; it fetches its data when it opens, so it is a different case. The time left is the app's render when the screen changes and the first frame's raster.
